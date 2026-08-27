@@ -48,7 +48,7 @@ class AgentConfig:
     #: schemas are shared, so switching providers changes no tool code.
     #: Gemini is the default because it is the verified path.
     provider: str = "gemini"
-    model: str = "gemini-3.5-flash"
+    model: str = "gemini-3.1-flash-lite"
     max_tokens: int = 4096
     max_iterations: int = 20
     temperature: float = 0.0

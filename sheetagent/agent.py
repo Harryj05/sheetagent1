@@ -11,8 +11,10 @@ from .config import Config
 from .events import EventBus
 from .memory import ConversationMemory
 from .planner import Plan, make_plan
-from .providers import MissingCredentials, make_client
+from .providers import (MissingCredentials, ProviderPermanentError,
+                        classify_provider_error, make_client)
 from .registry import REGISTRY, ToolContext, ToolRegistry
+from .retry import with_retry
 
 #: Re-exported: MissingCredentials moved to .providers when Gemini was
 #: added, but it is part of this module's public surface.
@@ -80,6 +82,40 @@ class SheetAgent:
     def use_llm(self) -> bool:
         return self.client is not None
 
+    def _call_model(self, *, system: str, messages: list[dict[str, Any]],
+                    tools: list[dict[str, Any]] | None = None,
+                    label: str = "model-call") -> Any:
+        """One model call, with the same retry policy the tools already get.
+
+        A 503 "model is experiencing high demand" or a 429 rate limit is
+        transient, and letting one end a run that has already driven Excel is
+        needless. A 4xx rejection is not retried - it will be rejected the same
+        way every time.
+        """
+        def attempt() -> Any:
+            try:
+                return self.client.messages.create(
+                    model=self.config.agent.model,
+                    max_tokens=self.config.agent.max_tokens,
+                    temperature=self.config.agent.temperature,
+                    system=system,
+                    **({"tools": tools} if tools else {}),
+                    messages=messages,
+                )
+            except Exception as exc:
+                raise classify_provider_error(exc) from exc
+
+        retry = self.config.retry
+        return with_retry(
+            attempt,
+            max_attempts=max(retry.max_attempts, 4),
+            initial_delay=max(retry.initial_delay, 2.0),
+            backoff=retry.backoff,
+            max_delay=retry.max_delay,
+            give_up_on=(ProviderPermanentError,),
+            label=label,
+        )
+
     # ------------------------------------------------------------------ #
     def run(self, request: str) -> RunResult:
         ctx = ToolContext(config=self.config, events=self.events)
@@ -92,7 +128,7 @@ class SheetAgent:
         plan: Plan | None = None
         try:
             plan = (make_plan(self.client, self.config.agent.model, request, schemas,
-                              self.memory.summary())
+                              self.memory.summary(), call_model=self._call_model)
                     if self.use_llm else self.test_planner(request, schemas))
             self.events.emit("plan_ready", plan.render(), plan=plan.to_dict())
         except Exception as exc:
@@ -126,14 +162,9 @@ class SheetAgent:
 
         for iteration in range(1, self.config.agent.max_iterations + 1):
             try:
-                response = self.client.messages.create(
-                    model=self.config.agent.model,
-                    max_tokens=self.config.agent.max_tokens,
-                    temperature=self.config.agent.temperature,
-                    system=SYSTEM_PROMPT,
-                    tools=schemas,
-                    messages=messages,
-                )
+                response = self._call_model(
+                    system=SYSTEM_PROMPT, tools=schemas, messages=messages,
+                    label=f"executor-turn-{iteration}")
             except Exception as exc:
                 # A provider outage, a rate limit or an exhausted quota must not
                 # dump a traceback over a run that has already done real work.

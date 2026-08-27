@@ -10,7 +10,7 @@ agent:
   # Gemini is the default because it is the path verified end to end against
   # the live API; for Anthropic use provider: anthropic + model: claude-sonnet-5.
   provider: gemini
-  model: gemini-3.5-flash
+  model: gemini-3.1-flash-lite
   max_tokens: 4096
   max_iterations: 20
   temperature: 0.0

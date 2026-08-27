@@ -156,7 +156,7 @@ def test_test_mode_plan_is_labelled_as_non_reasoning(config):
     assert any("DETERMINISTIC TEST PLANNER" in r for r in result.plan.risks)
 
 
-def test_provider_error_mid_run_is_reported_not_raised(config):
+def test_provider_error_mid_run_is_reported_not_raised(config, monkeypatch):
     """A rate limit or outage must not dump a traceback over completed work.
 
     Regression: an exhausted Gemini quota crashed the process with a raw
@@ -178,6 +178,10 @@ def test_provider_error_mid_run_is_reported_not_raised(config):
     ])
     config.agent.enabled_tools = ["generate_employee_csv"]
 
+    import functools
+    from sheetagent import agent as agent_mod
+    monkeypatch.setattr(agent_mod, "with_retry",
+                        functools.partial(agent_mod.with_retry, sleep=lambda _: None))
     result = SheetAgent(config=config, client=client).run("make a csv")
 
     assert result.steps[0]["status"] == "success", "completed work must survive"
@@ -187,3 +191,59 @@ def test_provider_error_mid_run_is_reported_not_raised(config):
     assert "stopped early" in result.report
     assert "1 of 1 step(s) succeeded" in result.report
     assert result.ok is False
+
+
+# --------------------------------------------------------------------------- #
+# Provider-level retry. A 503 "model is experiencing high demand" is transient;
+# abandoning a run over one wastes work the agent has already done.
+# --------------------------------------------------------------------------- #
+def _no_sleep(monkeypatch):
+    import functools
+    from sheetagent import agent as agent_mod
+    monkeypatch.setattr(agent_mod, "with_retry",
+                        functools.partial(agent_mod.with_retry, sleep=lambda _: None))
+
+
+def test_transient_provider_error_is_retried(config, monkeypatch):
+    """A 503 on the first attempt must not end the run."""
+    _no_sleep(monkeypatch)
+    attempts = []
+
+    class Flaky(FakeClient):
+        def create(self, **kwargs):
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise RuntimeError("503 UNAVAILABLE: model is experiencing high demand")
+            return self.script.pop(0)
+
+    plan_json = json.dumps({"goal": "csv", "steps": [
+        {"n": 1, "tool": "generate_employee_csv", "intent": "make", "inputs": {}}],
+        "risks": []})
+    client = Flaky([FakeResponse([TextBlock(plan_json)]),
+                    FakeResponse([ToolUseBlock("generate_employee_csv", {"row_count": 20})]),
+                    FakeResponse([TextBlock("done")])])
+    config.agent.enabled_tools = ["generate_employee_csv"]
+
+    result = SheetAgent(config=config, client=client).run("make a csv")
+
+    assert len(attempts) > 3, "the 503 should have been retried, not fatal"
+    assert result.steps[0]["status"] == "success"
+
+
+def test_permanent_provider_error_is_not_retried(config, monkeypatch):
+    """A 400 will be rejected identically every time; retrying wastes the demo."""
+    _no_sleep(monkeypatch)
+    attempts = []
+
+    class Rejecting(FakeClient):
+        def create(self, **kwargs):
+            attempts.append(1)
+            raise RuntimeError("400 INVALID_ARGUMENT: malformed request")
+
+    config.agent.enabled_tools = ["generate_employee_csv"]
+    result = SheetAgent(config=config, client=Rejecting([])).run("make a csv")
+
+    # one planner attempt + one executor attempt, neither retried
+    assert len(attempts) == 2, f"expected no retries, got {len(attempts)} calls"
+    assert result.steps[-1]["status"] == "failed"
+    assert "stopped early" in result.report

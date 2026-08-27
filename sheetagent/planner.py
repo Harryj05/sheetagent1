@@ -84,14 +84,24 @@ def parse_plan(payload: dict[str, Any], valid_tools: list[str]) -> Plan:
 
 
 def make_plan(client, model: str, request: str, tools: list[dict[str, Any]],
-              memory_summary: str = "") -> Plan:
+              memory_summary: str = "", call_model=None) -> Plan:
+    """Ask the model for a plan.
+
+    ``call_model`` lets the agent inject its own retrying caller, so a 503 on
+    the planning turn does not lose the run before any work has started. It
+    falls back to a plain client call when not supplied.
+    """
     catalog = "\n".join(f"- {t['name']}: {t['description']}" for t in tools)
     user = (f"User request:\n{request}\n\nAvailable tools:\n{catalog}"
             + (f"\n\nContext from earlier runs:\n{memory_summary}" if memory_summary else ""))
-    response = client.messages.create(
-        model=model, max_tokens=1200, temperature=0,
-        system=PLANNER_SYSTEM,
-        messages=[{"role": "user", "content": user}],
-    )
+    messages = [{"role": "user", "content": user}]
+    if call_model is not None:
+        response = call_model(system=PLANNER_SYSTEM, messages=messages,
+                              label="planner")
+    else:
+        response = client.messages.create(
+            model=model, max_tokens=1200, temperature=0,
+            system=PLANNER_SYSTEM, messages=messages,
+        )
     text = "".join(b.text for b in response.content if getattr(b, "type", "") == "text")
     return parse_plan(_extract_json(text), [t["name"] for t in tools])

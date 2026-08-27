@@ -15,7 +15,7 @@ python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
 
 # 2. Confirm the suite is green
-.venv\Scripts\python.exe -m pytest -q          # expect: 102 passed
+.venv\Scripts\python.exe -m pytest -q          # expect: 104 passed
 
 # 3. Point at your shared Google Sheet (deliberately blank in the repo)
 #    config.yaml -> sheets.spreadsheet_id: "1n5UQn1wwLNl-8ztNFa5Qy0kubuG_vMM3KfnDrc0abKU"
@@ -24,7 +24,7 @@ python -m venv .venv
 set GEMINI_API_KEY=<your key>
 echo %GEMINI_API_KEY%
 
-# config.yaml -> agent.provider: gemini / agent.model: gemini-3.5-flash
+# config.yaml -> agent.provider: gemini / agent.model: gemini-3.1-flash-lite
 ```
 
 Checklist:
@@ -55,7 +55,7 @@ Checklist:
 | **5:30–6:15** | Break Google Sheets, re-run | "Excel still succeeds. Sheets fails with the actual cause and a fix. Verification degrades to PARTIAL rather than claiming success. One broken integration doesn't take down the run." |
 | **6:15–6:45** | Unset the API key, re-run | "Exit 2. No silent downgrade — if the model can't choose the tools, the agent refuses rather than quietly running a fixed sequence and reporting the same success." |
 | **6:45–7:00** | *(optional)* `tests/test_gemini_provider.py`, the signature tests | "The live run caught something unit tests couldn't: Gemini 3 requires an opaque reasoning token echoed back on every tool call. Four regression tests now pin it." |
-| **6:45–7:15** | `logs/agent.jsonl`, then `pytest -q` | "Structured JSON logs, one object per line, tagged with a run id. 102 tests — no network, no API key, no Excel required." |
+| **6:45–7:15** | `logs/agent.jsonl`, then `pytest -q` | "Structured JSON logs, one object per line, tagged with a run id. 104 tests — no network, no API key, no Excel required." |
 | **7:15–7:45** | `config.yaml` → `enabled_tools`, `provider` | "Delete a tool from this list and the model never sees it. Switch `provider` to `gemini` and the same tools run through a different model — the adapter translates, the tool code doesn't change." |
 | **7:45–8:00** | `claude mcp list` → `sheetagent ✔ Connected` | "The same four tools are also exposed over MCP, so Claude Code can drive the workflow directly instead of the CLI." |
 

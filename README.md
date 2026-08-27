@@ -111,6 +111,7 @@ never means touching a tool.
 | Independent `verify_imports` tool | The agent isn't allowed to claim success from its own earlier output. Verification re-opens the saved workbook and re-reads the live Google Sheet, then compares headers and row counts against the CSV. |
 | Memory replays a fixed window, not the whole transcript | Facts (last CSV path, last spreadsheet URL) are kept forever because they are tiny and are what makes a follow-up run useful. The transcript is capped two ways: `tool_result` blocks are stored as `status` + `summary` only, and just the last two exchanges are replayed. Run 50's prompt is the same size as run 1's. |
 | Providers are adapters, not branches | `agent.py` and `planner.py` know exactly one interface — `client.messages.create(...) -> response.content`. Gemini support is a translation layer (`sheetagent/providers/gemini.py`) that reshapes tool schemas, conversation and responses into that interface. The tool registry stays the single source of truth: switching provider changes no tool code and no executor code. |
+| Model calls retry, tool calls retry, both by error class | A 503 or 429 from the provider is transient and is retried with backoff; a 400 is not. Without this a single load spike ends a run that has already opened Excel and written a spreadsheet. |
 | `give_up_on` in the retry helper | Retrying a missing credentials file three times is theatre. Configuration errors fail on attempt 1; transient API errors get exponential backoff. |
 | **No silent downgrade** | Without a key for the configured provider (`GEMINI_API_KEY` by default) the agent refuses to start (exit 2). An agent whose premise is "the model chooses the tools" must not quietly run a fixed sequence and report the same success. |
 | `--test-mode` lives in `tests/` | CI still needs to exercise the tool layer, retries and verification without a key. That fixed plan is a **test double**, kept in `tests/support/deterministic_planner.py` so it can never be mistaken for the product's planner, and every plan it produces is labelled `DETERMINISTIC TEST PLANNER`. |
@@ -329,7 +330,7 @@ Set `agent.provider` in `config.yaml` (or `SHEETAGENT_PROVIDER`):
 
 | Provider | Key | Model | Status |
 |---|---|---|---|
-| `gemini` (default) | `GEMINI_API_KEY` | `gemini-3.5-flash` | Verified end to end against the live API |
+| `gemini` (default) | `GEMINI_API_KEY` | `gemini-3.1-flash-lite` | Verified end to end against the live API |
 | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5` | Implemented and unit-tested; no live run made |
 
 Gemini is the default because it is the path that has actually been run against
@@ -412,7 +413,8 @@ all covered offline.
 |---|---|
 | `pywin32 is not installed / not on Windows` | Expected off Windows — the openpyxl fallback runs. On Windows: `pip install pywin32` then `python Scripts/pywin32_postinstall.py -install`. |
 | `credentials file not found` | Step 4 above; check `sheets.credentials_file`. |
-| `429 RESOURCE_EXHAUSTED` from Gemini | The free tier allows 20 requests per day *per model*, and one agent run costs several. Switch `agent.model` to another model (`gemini-3.6-flash`, `gemini-3.1-flash-lite`) — each has its own quota — or wait for the reset. |
+| `503 UNAVAILABLE` / `429` from the model | Retried automatically with backoff, so most spikes are invisible. If every attempt fails, that model is genuinely saturated - switch `agent.model` (each model has its own quota and load). |
+| `429 RESOURCE_EXHAUSTED` from Gemini | The free tier allows 20 requests per day *per model*, and one agent run costs several. Switch `agent.model` to another model (`gemini-3.6-flash`, `gemini-3.5-flash-lite`) — each has its own quota — or wait for the reset. |
 | Run stops with `the model provider returned an error` | Expected behaviour, not a crash: a provider outage or rate limit ends the run cleanly and the report lists whatever completed first. Re-run when the provider recovers. |
 | `403 The caller does not have permission` when creating a sheet | A service account cannot create Drive files at all. Create the sheet yourself, share it with the service-account address as Editor, and set `sheets.spreadsheet_id`. |
 | `403 Google Sheets API has not been used` | Enable the Sheets **and** Drive APIs in the Cloud project. |
