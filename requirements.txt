@@ -1,0 +1,19 @@
+# --- agent core ---
+anthropic>=0.40.0
+PyYAML>=6.0.1
+python-dotenv>=1.0.1
+
+# --- spreadsheets ---
+openpyxl>=3.1.2
+odfpy>=1.4.1              # optional: .ods output
+
+# --- Google Sheets API ---
+google-api-python-client>=2.130.0
+google-auth>=2.30.0
+google-auth-oauthlib>=1.2.0
+
+# --- MCP server (bonus) ---
+mcp>=1.2.0
+
+# --- Windows only: drives the real Excel application ---
+pywin32>=306 ; sys_platform == "win32"

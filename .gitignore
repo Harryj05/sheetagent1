@@ -1,0 +1,34 @@
+# --- secrets: never commit these -------------------------------------------
+credentials.json
+token.json
+.env
+*.pem
+service-account*.json
+
+# --- run artifacts ----------------------------------------------------------
+output/
+demo_output/
+logs/
+memory/
+run_result.json
+run_stderr.txt
+
+# --- python -----------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- editors / os -----------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Excel lock files -------------------------------------------------------
+~$*.xlsx
+~$*.xlsm

@@ -1,0 +1,36 @@
+# Everything the agent does is configurable here; env vars override.
+output_dir: output
+log_level: INFO
+log_dir: logs
+memory_file: memory/conversation.json
+
+agent:
+  model: claude-sonnet-5
+  max_tokens: 4096
+  max_iterations: 20
+  temperature: 0.0
+  # Drop a name from this list to disable that tool entirely.
+  enabled_tools:
+    - generate_employee_csv
+    - import_csv_to_excel
+    - import_csv_to_google_sheets
+    - verify_imports
+
+excel:
+  engine: auto          # auto | com | openpyxl
+  visible: true         # show the Excel window (COM only)
+  close_after_save: false
+  output_dir: output
+
+sheets:
+  credentials_file: credentials.json
+  token_file: token.json
+  spreadsheet_id: ""    # blank -> create a new spreadsheet each run
+  worksheet_title: Employees
+  share_with: []        # e.g. ["you@gmail.com"] when using a service account
+
+retry:
+  max_attempts: 3
+  initial_delay: 1.0
+  backoff: 2.0
+  max_delay: 15.0
