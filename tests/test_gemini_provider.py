@@ -284,3 +284,57 @@ def test_agent_honours_the_configured_provider(config, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     config.agent.provider = "gemini"
     assert isinstance(SheetAgent(config=config).client, GeminiClient)
+
+
+# --------------------------------------------------------------------------- #
+# Gemini 3.x thought signatures.
+#
+# Regression: the adapter originally dropped the opaque reasoning token Gemini
+# attaches to each functionCall part. Unit tests passed and the live API
+# rejected the second turn with 400 INVALID_ARGUMENT ("Function call is missing
+# a thought_signature in functionCall parts"). Caught only by a real run.
+# --------------------------------------------------------------------------- #
+@dataclass
+class SignedPart:
+    text: str | None = None
+    function_call: FakeFunctionCall | None = None
+    thought_signature: bytes | None = None
+
+
+def test_thought_signature_is_captured_from_the_response():
+    result = from_response(_response(SignedPart(
+        function_call=FakeFunctionCall("generate_employee_csv", {"row_count": 20}),
+        thought_signature=b"sig-abc")))
+    assert result.content[0].thought_signature == b"sig-abc"
+
+
+def test_thought_signature_is_echoed_back_on_the_next_turn():
+    """Gemini rejects the turn unless the signature is returned verbatim."""
+    call = ToolUseBlock(name="generate_employee_csv", input={"row_count": 20},
+                        id="generate_employee_csv::0", thought_signature=b"sig-abc")
+    parts = to_contents([{"role": "assistant", "content": [call]}])[0]["parts"]
+    assert parts[0]["thought_signature"] == b"sig-abc"
+
+
+def test_absent_thought_signature_is_omitted_not_sent_as_none():
+    """Anthropic-shaped history has no signature; sending null would be invalid."""
+    call = ToolUseBlock(name="verify_imports", input={}, id="verify_imports::0")
+    parts = to_contents([{"role": "assistant", "content": [call]}])[0]["parts"]
+    assert "thought_signature" not in parts[0]
+
+
+def test_signature_survives_a_full_executor_round_trip(config):
+    """The executor replays its own history; the signature must ride along."""
+    config.agent.provider = "gemini"
+    config.agent.enabled_tools = ["generate_employee_csv"]
+    client = ScriptedGemini([
+        _plan_response("generate_employee_csv"),
+        FakeGeminiResponse(candidates=[FakeCandidate(FakeContent([SignedPart(
+            function_call=FakeFunctionCall("generate_employee_csv", {"row_count": 20}),
+            thought_signature=b"sig-xyz")]))]),
+        _response(FakePart(text="done")),
+    ])
+    SheetAgent(config=config, client=client).run("make a csv")
+
+    model_turn = [c for c in client.calls[-1]["contents"] if c["role"] == "model"][-1]
+    assert model_turn["parts"][0]["thought_signature"] == b"sig-xyz"

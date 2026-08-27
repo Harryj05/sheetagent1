@@ -52,6 +52,11 @@ class ToolUseBlock:
     input: dict[str, Any]
     id: str
     type: str = "tool_use"
+    #: Gemini 3.x returns an opaque reasoning token on each functionCall part
+    #: and rejects the next turn (400 INVALID_ARGUMENT) unless it is echoed
+    #: back verbatim. It is carried on the block so the executor can replay
+    #: history unchanged without knowing this provider detail exists.
+    thought_signature: Any = None
 
 
 @dataclass
@@ -107,16 +112,24 @@ def _block_to_part(block: Any) -> dict[str, Any] | None:
         if kind == "text":
             return {"text": getattr(block, "text", "")}
         if kind == "tool_use":
-            return {"function_call": {"name": getattr(block, "name", ""),
-                                      "args": dict(getattr(block, "input", {}) or {})}}
+            part: dict[str, Any] = {
+                "function_call": {"name": getattr(block, "name", ""),
+                                  "args": dict(getattr(block, "input", {}) or {})}}
+            signature = getattr(block, "thought_signature", None)
+            if signature:
+                part["thought_signature"] = signature
+            return part
         return None
 
     kind = block.get("type")
     if kind == "text":
         return {"text": block.get("text", "")}
     if kind == "tool_use":
-        return {"function_call": {"name": block.get("name", ""),
+        part = {"function_call": {"name": block.get("name", ""),
                                   "args": dict(block.get("input") or {})}}
+        if block.get("thought_signature"):
+            part["thought_signature"] = block["thought_signature"]
+        return part
     if kind == "tool_result":
         payload = block.get("content")
         if isinstance(payload, str):
@@ -167,8 +180,9 @@ def from_response(response: Any) -> Response:
         if call is not None:
             name = getattr(call, "name", "") or ""
             args = getattr(call, "args", None) or {}
-            blocks.append(ToolUseBlock(name=name, input=dict(args),
-                                       id=tool_use_id(name, index)))
+            blocks.append(ToolUseBlock(
+                name=name, input=dict(args), id=tool_use_id(name, index),
+                thought_signature=getattr(part, "thought_signature", None)))
             continue
         text = getattr(part, "text", None)
         if text:

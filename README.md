@@ -268,12 +268,12 @@ Set `agent.provider` in `config.yaml` (or `SHEETAGENT_PROVIDER`):
 | Provider | Key | Suggested model |
 |---|---|---|
 | `anthropic` (default) | `ANTHROPIC_API_KEY` | `claude-sonnet-5` |
-| `gemini` | `GEMINI_API_KEY` | `gemini-2.5-flash` |
+| `gemini` | `GEMINI_API_KEY` | `gemini-3.6-flash` |
 
 ```yaml
 agent:
   provider: gemini
-  model: gemini-2.5-flash
+  model: gemini-3.6-flash
 ```
 
 ```bash
@@ -296,6 +296,12 @@ without holding cross-call state.
 
 `google-genai` is only imported when `provider: gemini` is actually selected, so
 Anthropic-only installs need not have it.
+
+**Verified against the live Gemini API.** Gemini 3.x attaches an opaque
+`thought_signature` to every `functionCall` part and rejects the following turn
+with `400 INVALID_ARGUMENT` unless it is echoed back verbatim. The adapter
+carries it on the tool-use block so the executor replays history unchanged
+without knowing this provider detail exists.
 
 ---
 

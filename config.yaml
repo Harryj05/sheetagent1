@@ -9,7 +9,7 @@ agent:
   # The tool registry is shared, so switching providers changes no tool code.
   provider: anthropic
   model: claude-sonnet-5
-  # For Gemini, set provider: gemini and model: gemini-2.5-flash
+  # For Gemini: provider: gemini + model: gemini-3.6-flash (2.5-flash is retired)
   max_tokens: 4096
   max_iterations: 20
   temperature: 0.0

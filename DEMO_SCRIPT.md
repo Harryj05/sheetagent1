@@ -15,13 +15,16 @@ python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
 
 # 2. Confirm the suite is green
-.venv\Scripts\python.exe -m pytest -q          # expect: 94 passed
+.venv\Scripts\python.exe -m pytest -q          # expect: 98 passed
 
 # 3. Point at your shared Google Sheet (deliberately blank in the repo)
 #    config.yaml -> sheets.spreadsheet_id: "1n5UQn1wwLNl-8ztNFa5Qy0kubuG_vMM3KfnDrc0abKU"
 
-# 4. Confirm the key is live
-echo %ANTHROPIC_API_KEY%
+# 4. Confirm the key is live. This demo runs on Gemini - the verified path.
+set GEMINI_API_KEY=<your key>
+echo %GEMINI_API_KEY%
+
+# config.yaml -> agent.provider: gemini / agent.model: gemini-3.6-flash
 ```
 
 Checklist:
@@ -43,7 +46,7 @@ Checklist:
 
 | Time | Show | Say |
 |---|---|---|
-| **0:00–0:40** | `README.md` architecture diagram | "Four tools, two stages. A planner asks the model for an ordered plan, then an executor runs a Claude tool-calling loop. The step order is *not* in the code — it's whatever the model decides. Swap the prompt and a different subset of tools runs." |
+| **0:00–0:40** | `README.md` architecture diagram | "Four tools, two stages. A planner asks the model for an ordered plan, then an executor runs a tool-calling loop. The step order is *not* in the code — it's whatever the model decides. Swap the prompt and a different subset of tools runs." |
 | **0:40–1:20** | `sheetagent/registry.py`, one `@tool` decorator | "A plain Python function becomes a model-callable tool. The registry generates the JSON schema and executes defensively — a tool that raises returns `{'status': 'failed'}` instead of killing the run. That's what makes partial failure survivable." |
 | **1:20–3:30** | **The headline run** (command below) | Read the printed plan aloud. Narrate each `[OK]` line as it appears. **Excel visibly launches.** Let it finish; read the four-line report. |
 | **3:30–4:20** | `output/employees.xlsx` and the Google Sheet, side by side | "Same 20 rows in both. Note the Excel workbook has a frozen header and salaries stored as numbers, not text — and the Google Sheet has its own frozen header row." |
@@ -51,7 +54,8 @@ Checklist:
 | **4:50–5:30** | The CSV-only prompt | "One tool call, not four. Same code, same registry — the model read the request and chose. That's the difference between an agent and a script." |
 | **5:30–6:15** | Break Google Sheets, re-run | "Excel still succeeds. Sheets fails with the actual cause and a fix. Verification degrades to PARTIAL rather than claiming success. One broken integration doesn't take down the run." |
 | **6:15–6:45** | Unset the API key, re-run | "Exit 2. No silent downgrade — if the model can't choose the tools, the agent refuses rather than quietly running a fixed sequence and reporting the same success." |
-| **6:45–7:15** | `logs/agent.jsonl`, then `pytest -q` | "Structured JSON logs, one object per line, tagged with a run id. 94 tests — no network, no API key, no Excel required." |
+| **6:45–7:00** | *(optional)* `tests/test_gemini_provider.py`, the signature tests | "The live run caught something unit tests couldn't: Gemini 3 requires an opaque reasoning token echoed back on every tool call. Four regression tests now pin it." |
+| **6:45–7:15** | `logs/agent.jsonl`, then `pytest -q` | "Structured JSON logs, one object per line, tagged with a run id. 98 tests — no network, no API key, no Excel required." |
 | **7:15–7:45** | `config.yaml` → `enabled_tools`, `provider` | "Delete a tool from this list and the model never sees it. Switch `provider` to `gemini` and the same tools run through a different model — the adapter translates, the tool code doesn't change." |
 | **7:45–8:00** | `claude mcp list` → `sheetagent ✔ Connected` | "The same four tools are also exposed over MCP, so Claude Code can drive the workflow directly instead of the CLI." |
 
@@ -97,12 +101,12 @@ Excel succeeds, Sheets reports `credentials file not found`, verify goes PARTIAL
 **4 — No silent downgrade (6:15)**
 
 ```bash
-set ANTHROPIC_API_KEY=
+set GEMINI_API_KEY=
 python -m sheetagent "Create an employee CSV."
 ```
 
 ```
-error: ANTHROPIC_API_KEY is not set, so the agent cannot plan or choose tools.
+error: GEMINI_API_KEY is not set, so the agent cannot plan or choose tools.
 Set the key, or pass --test-mode to run the fixed deterministic plan used by CI.
 ```
 
@@ -140,8 +144,9 @@ Accuracy matters more than polish; a reviewer who catches one overstatement
 discounts everything else.
 
 - **Don't say the Docker image runs the full agent.** It cannot launch Excel.
-- **Don't say Gemini is production-verified.** The adapter is thoroughly
-  unit-tested but has never been run against the live Gemini API.
+- **Don't say the Anthropic path is verified.** The Anthropic provider is
+  implemented and unit-tested, but no live Anthropic run has been made. The
+  demo runs on **Gemini**, which *is* live-verified end to end.
 - **Don't say the service account creates the sheet.** It cannot — it has no
   Drive storage. It writes to a sheet you created and shared with it. If asked
   why, that's a good answer to have ready: it's a real Google constraint that
@@ -156,4 +161,4 @@ discounts everything else.
 | Excel step fails, sharing violation | A stray `EXCEL.EXE` holds the workbook. Kill it in Task Manager. |
 | Sheets step 403 | `sheets.spreadsheet_id` is blank or the share lapsed. Re-share with the service-account address. |
 | `CONNECTION_CLOSED` from MCP | Registration points at a bare `python`. Re-register with the absolute `.venv` interpreter path. |
-| Agent exits 2 immediately | `ANTHROPIC_API_KEY` isn't set in *this* shell. |
+| Agent exits 2 immediately | The provider's key (`GEMINI_API_KEY`) isn't set in *this* shell. |
