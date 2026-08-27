@@ -1,0 +1,5 @@
+# Keep binaries byte-exact: git was applying CRLF conversion to the PDF.
+*.pdf binary
+*.xlsx binary
+*.ods binary
+*.png binary
