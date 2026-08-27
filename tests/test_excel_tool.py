@@ -176,3 +176,25 @@ def test_tool_boundary_hands_engines_absolute_paths(ctx, monkeypatch):
     csv_result = generate_employee_csv(ctx=ctx, row_count=2, seed=1)
     import_csv_to_excel(ctx=ctx, csv_path=csv_result["csv_path"])
     assert seen["csv"].is_absolute() and seen["out"].is_absolute()
+
+
+def test_headless_runs_say_excel_was_not_launched(ctx):
+    """A container/CI run must not read as though Excel had been driven."""
+    csv_result = generate_employee_csv(ctx=ctx, row_count=2, seed=1)
+    result = import_csv_to_excel(ctx=ctx, csv_path=csv_result["csv_path"])
+    assert result["engine"] == "openpyxl"
+    assert result["excel_launched"] is False
+    assert "NOT launched" in result["warning"]
+
+
+def test_com_runs_report_excel_was_launched(ctx, monkeypatch):
+    monkeypatch.setattr(excel_tool, "_import_via_com",
+                        lambda csv_path, out_path, **kw: (
+                            out_path.write_bytes(b"x"),
+                            {"engine": "com", "rows_in_sheet": 3,
+                             "columns_in_sheet": 5})[1])
+    ctx.config.excel.engine = "com"
+    csv_result = generate_employee_csv(ctx=ctx, row_count=2, seed=1)
+    result = import_csv_to_excel(ctx=ctx, csv_path=csv_result["csv_path"])
+    assert result["excel_launched"] is True
+    assert "warning" not in result

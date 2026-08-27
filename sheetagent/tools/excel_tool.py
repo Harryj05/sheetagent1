@@ -419,8 +419,18 @@ def import_csv_to_excel(ctx: ToolContext, csv_path: str,
         **details,
         "summary": f"Saved workbook to {target} using the {details['engine']} engine",
     }
+    # State plainly whether the real application was driven. A reviewer should
+    # not have to infer it from the engine name, and a container or CI run must
+    # never read as though Excel had been launched.
+    result["excel_launched"] = details["engine"] == "com"
     if fallback_reason:
         result["fallback_reason"] = fallback_reason
         result["warning"] = ("Microsoft Excel was not available on this machine; "
                              "the workbook was written headlessly instead.")
+    elif not result["excel_launched"]:
+        result["warning"] = (
+            f"Microsoft Excel was NOT launched; the workbook was written "
+            f"headlessly by the {details['engine']} engine. Run natively on "
+            "Windows with excel.engine=auto or com to drive the real "
+            "application.")
     return result

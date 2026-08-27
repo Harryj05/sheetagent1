@@ -186,28 +186,59 @@ tool-calling loop uses, so the two surfaces cannot drift apart.
 
 ---
 
-## Docker
+## Docker — CI / headless test runner
+
+**This image is not a deployment of the full agent.** The Excel requirement
+means launching the real Microsoft Excel application, which SheetAgent does via
+COM (pywin32) — that needs Windows and an installed Excel. A Linux container has
+neither, and `pywin32` is marker-gated so it is not installed in the image at
+all.
+
+| | In the container | Native on Windows |
+|---|---|---|
+| Launch Microsoft Excel | **No** | Yes |
+| COM engine + its error classification | **No** | Yes |
+| Planner, tool-calling loop, tool selection | Yes | Yes |
+| CSV generation | Yes | Yes |
+| Workbook written (headless, openpyxl) | Yes | Yes |
+| Google Sheets import | Yes | Yes |
+| Verification, MCP server | Yes | Yes |
+| Test suite | Yes | Yes |
+
+Use the image to run the suite reproducibly and to exercise everything that is
+not COM. **Run natively on Windows for the demo and for anything meant to
+satisfy the Excel requirement.**
 
 ```bash
 docker build -t sheetagent .
 
-# default prompt
-docker run --rm -v "$PWD/output:/app/output" sheetagent
+# what the image is for: the test suite
+docker run --rm sheetagent
 
-# your own prompt, with credentials and a key
-docker run --rm   -e ANTHROPIC_API_KEY   -v "$PWD/credentials.json:/app/credentials.json:ro"   -v "$PWD/output:/app/output"   -v "$PWD/logs:/app/logs"   sheetagent "Generate 30 employees and upload them to Google Sheets."
+# exercise the workflow headlessly (openpyxl, no Excel)
+docker run --rm -v "$PWD/output:/app/output"   sheetagent python -m sheetagent --test-mode   "Create an employee CSV and import it into Excel."
+
+# with a key and credentials, the model-driven path minus Excel
+docker run --rm   -e ANTHROPIC_API_KEY   -v "$PWD/credentials.json:/app/credentials.json:ro"   -v "$PWD/output:/app/output"   -v "$PWD/logs:/app/logs"   sheetagent python -m sheetagent "Generate 30 employees and upload them to Google Sheets."
 ```
 
-**What the container can and cannot do.** The COM engine drives the real
-Microsoft Excel application, which needs Windows and an Excel install; a Linux
-container has neither. The image therefore sets `SHEETAGENT_EXCEL_ENGINE=openpyxl`
-and the Excel step runs headlessly, reporting `engine: openpyxl` so nothing is
-misrepresented. Planning, the tool-calling loop, CSV generation, Google Sheets,
-verification and the MCP server are all fully functional in the container. Run
-natively on Windows for the real-Excel demo.
+The image pins `SHEETAGENT_EXCEL_ENGINE=openpyxl` rather than relying on `auto`,
+so a container run never even appears to have attempted COM. Every headless run
+reports `"excel_launched": false` plus an explicit warning naming the engine
+that actually wrote the workbook, so a container run cannot be mistaken for one
+that drove Excel:
 
-`output/`, `logs/` and `memory/` are declared as volumes so artifacts outlive the
-container. The image runs as a non-root user.
+```json
+{
+  "status": "success",
+  "engine": "openpyxl",
+  "excel_launched": false,
+  "warning": "Microsoft Excel was NOT launched; the workbook was written headlessly by the openpyxl engine. Run natively on Windows with excel.engine=auto or com to drive the real application."
+}
+```
+
+`output/`, `logs/` and `memory/` are volumes so artifacts outlive the container.
+The image runs as a non-root user.
 
 ---
 
