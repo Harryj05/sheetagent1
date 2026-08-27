@@ -13,7 +13,57 @@ No further interaction is required after that command.
 
 ---
 
-## How it works
+## How it works, in plain words
+
+**1.** You type one sentence, like *"Create an employee CSV and import it into
+Excel and Google Sheets."*
+
+**2.** The agent has four tools it can use: make a CSV, put data into Excel, put
+data into Google Sheets, and check that both worked.
+
+**3.** It does **not** follow a fixed list of steps. It sends your sentence to an
+AI model along with a list of what tools exist.
+
+**4.** The model first makes a **plan** — "I will do this, then this, then this."
+The plan is printed for you before anything runs.
+
+**5.** If the model names a tool that does not exist, that step is thrown away.
+It can only use real tools.
+
+**6.** Then the work starts. The model says *"run this tool"*, the runtime runs
+it, and the result goes back to the model.
+
+**7.** The model reads the result and decides what to do next. This repeats until
+the job is done.
+
+**8.** If a tool fails, the model is told that it failed and why. The run
+continues with the steps that still work instead of crashing.
+
+**9.** The tools do the real work — Excel actually opens on your screen and saves
+the file, and Google Sheets is filled through Google's official API.
+
+**10.** At the end, a **separate** tool checks the work. It re-opens the saved
+Excel file and re-reads the Google Sheet, then compares both against the original
+CSV. The agent is not allowed to simply claim success — it has to prove it.
+
+**11.** If something fails for a permanent reason (a missing credentials file) it
+does not retry, because retrying cannot help. If it fails for a temporary reason
+(the API is busy) it waits and tries again.
+
+**12.** Finally it prints a report showing which steps passed and which failed,
+with file paths and the Google Sheet link.
+
+### The key idea in one line
+
+> A normal script is told **what steps to do**. This agent is told **what tools
+> exist** — and it decides the steps itself.
+
+That is why the same program handles *"just make a CSV"* (one tool) and *"do
+everything"* (four tools) without changing a single line of code.
+
+---
+
+## How it works, in detail
 
 ```
 natural language
