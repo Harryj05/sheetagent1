@@ -29,7 +29,12 @@ excel:
 sheets:
   credentials_file: credentials.json
   token_file: token.json
-  spreadsheet_id: ""    # blank -> create a new spreadsheet each run
+  # REQUIRED when using a service account: a service account has no Drive
+  # storage of its own and CANNOT create files, so it must be pointed at a
+  # sheet you created and shared with the service-account address as Editor.
+  # Leave blank only with OAuth desktop credentials, which create the sheet
+  # in your own Drive.
+  spreadsheet_id: ""
   worksheet_title: Employees
   # A service account owns files in its OWN Drive; without this the sheet is
   # created successfully but you cannot open it.

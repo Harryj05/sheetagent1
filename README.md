@@ -95,19 +95,37 @@ python -c "import win32com.client as w; print(w.Dispatch('Excel.Application').Ve
 
 Either auth style works; the tool detects which one you gave it.
 
-**Service account (recommended for an unattended demo)**
+**Service account**
 
-1. Google Cloud Console → new project → enable **Google Sheets API** and **Google Drive API**.
-2. *IAM & Admin → Service Accounts* → create one → *Keys* → add key → JSON.
-3. Save it as `credentials.json` in the project root.
-4. Put your own Gmail in `config.yaml` under `sheets.share_with` so the new
-   spreadsheet appears in your Drive and opens in your browser during the demo.
+> **A service account has no Drive storage of its own and cannot create files.**
+> `spreadsheets.create` fails with a bare `403 The caller does not have
+> permission`; the underlying cause is `The user's Drive storage quota has been
+> exceeded`. Leaving `sheets.spreadsheet_id` blank therefore *cannot* work with
+> a service account - it must be pointed at a sheet that already exists.
 
-**OAuth desktop client**
+1. Google Cloud Console -> new project -> enable **Google Sheets API** and
+   **Google Drive API**.
+2. *IAM & Admin -> Service Accounts* -> create one -> *Keys* -> add key -> JSON.
+3. Save it as `credentials.json` in the project root (gitignored).
+4. Create a blank sheet at <https://sheets.new>, **Share** it with the
+   service-account address (`...iam.gserviceaccount.com`) as **Editor**, and copy
+   the id from the URL:
+   `https://docs.google.com/spreadsheets/d/<THIS>/edit`
+5. Put that id in `config.yaml` under `sheets.spreadsheet_id`.
 
-1. Same project → *APIs & Services → Credentials* → OAuth client ID → *Desktop app*.
-2. Download as `credentials.json`. First run opens a browser once; the grant is
-   cached in `token.json`.
+Google warns that the address is not a Google account and will not be notified.
+That is expected - click through it.
+
+**OAuth desktop client (lets the agent create sheets itself)**
+
+1. Same project -> *APIs & Services -> Credentials* -> OAuth client ID ->
+   *Desktop app*.
+2. Download as `credentials.json`. The tool detects which shape it was given.
+3. Leave `sheets.spreadsheet_id` blank; each run creates a new spreadsheet in
+   **your** Drive, so the storage-quota limit does not apply.
+
+First run opens a browser once and caches the grant in `token.json`; later runs
+are unattended.
 
 ---
 
@@ -318,7 +336,7 @@ all covered offline.
 |---|---|
 | `pywin32 is not installed / not on Windows` | Expected off Windows — the openpyxl fallback runs. On Windows: `pip install pywin32` then `python Scripts/pywin32_postinstall.py -install`. |
 | `credentials file not found` | Step 4 above; check `sheets.credentials_file`. |
-| Sheet created but you can't see it | Service accounts own their own Drive — add your email to `sheets.share_with`. |
+| `403 The caller does not have permission` when creating a sheet | A service account cannot create Drive files at all. Create the sheet yourself, share it with the service-account address as Editor, and set `sheets.spreadsheet_id`. |
 | `403 Google Sheets API has not been used` | Enable the Sheets **and** Drive APIs in the Cloud project. |
 | Excel opens but the workbook doesn't save | Close any modal dialog in Excel; the agent sets `DisplayAlerts = False` but a pre-existing dialog blocks COM. |
 | Agent stops after `max_iterations` | Raise `agent.max_iterations` in `config.yaml`. |
