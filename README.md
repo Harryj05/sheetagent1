@@ -329,7 +329,7 @@ Set `agent.provider` in `config.yaml` (or `SHEETAGENT_PROVIDER`):
 
 | Provider | Key | Model | Status |
 |---|---|---|---|
-| `gemini` (default) | `GEMINI_API_KEY` | `gemini-3.6-flash` | Verified end to end against the live API |
+| `gemini` (default) | `GEMINI_API_KEY` | `gemini-3.5-flash` | Verified end to end against the live API |
 | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5` | Implemented and unit-tested; no live run made |
 
 Gemini is the default because it is the path that has actually been run against
@@ -412,7 +412,7 @@ all covered offline.
 |---|---|
 | `pywin32 is not installed / not on Windows` | Expected off Windows — the openpyxl fallback runs. On Windows: `pip install pywin32` then `python Scripts/pywin32_postinstall.py -install`. |
 | `credentials file not found` | Step 4 above; check `sheets.credentials_file`. |
-| `429 RESOURCE_EXHAUSTED` from Gemini | The free tier allows 20 requests per day *per model*, and one agent run costs several. Switch `agent.model` to another model (`gemini-3.5-flash`, `gemini-3.1-flash-lite`) — each has its own quota — or wait for the reset. |
+| `429 RESOURCE_EXHAUSTED` from Gemini | The free tier allows 20 requests per day *per model*, and one agent run costs several. Switch `agent.model` to another model (`gemini-3.6-flash`, `gemini-3.1-flash-lite`) — each has its own quota — or wait for the reset. |
 | Run stops with `the model provider returned an error` | Expected behaviour, not a crash: a provider outage or rate limit ends the run cleanly and the report lists whatever completed first. Re-run when the provider recovers. |
 | `403 The caller does not have permission` when creating a sheet | A service account cannot create Drive files at all. Create the sheet yourself, share it with the service-account address as Editor, and set `sheets.spreadsheet_id`. |
 | `403 Google Sheets API has not been used` | Enable the Sheets **and** Drive APIs in the Cloud project. |

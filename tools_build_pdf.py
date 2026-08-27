@@ -100,7 +100,7 @@ A(rule(0, 10))
 A(Paragraph("Submitted by", H2))
 A(table([
     ["Repository", "github.com/Harryj05/sheetagent1"],
-    ["Model provider", "Gemini (gemini-3.6-flash) by default; Anthropic supported"],
+    ["Model provider", "Gemini (gemini-3.5-flash) by default; Anthropic supported"],
     ["Tests", "102 passing - no network, no API key, no Excel required"],
     ["Platform", "Windows for the real-Excel path; Linux/CI runs headless"],
 ], [32 * mm, 128 * mm], header=False))

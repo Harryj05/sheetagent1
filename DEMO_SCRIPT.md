@@ -24,7 +24,7 @@ python -m venv .venv
 set GEMINI_API_KEY=<your key>
 echo %GEMINI_API_KEY%
 
-# config.yaml -> agent.provider: gemini / agent.model: gemini-3.6-flash
+# config.yaml -> agent.provider: gemini / agent.model: gemini-3.5-flash
 ```
 
 Checklist:

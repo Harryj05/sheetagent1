@@ -4,7 +4,7 @@ The point of these is that **no step order is hardcoded** — the agent reads th
 request, plans, and calls only the tools it needs.
 
 Run them with `python -m sheetagent "<prompt>"`. Prompts marked **[verified]**
-have been run end to end against the live APIs on `gemini-3.6-flash`.
+have been run end to end against the live APIs on Gemini.
 
 > **Note on Google Sheets:** a service account cannot create spreadsheets, so
 > `sheets.spreadsheet_id` must point at a sheet you created and shared with it.
