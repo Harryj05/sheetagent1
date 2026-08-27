@@ -19,7 +19,7 @@ def _fat_tool_result(run: int) -> list[dict]:
                      "Department": "Engineering", "Email": "x" * 40,
                      "Salary": 100000} for i in range(3)],
     }
-    return [{"type": "tool_result", "tool_use_id": f"tu_{run}",
+    return [{"type": "tool_result", "tool_use_id": f"generate_employee_csv::{run}",
              "content": json.dumps(payload), "is_error": False}]
 
 
@@ -61,17 +61,38 @@ def test_replay_grows_no_further_after_fifty_runs(tmp_path):
         f"replay still drifting with history: {ten} -> {fifty}")
 
 
-def test_tool_result_payloads_are_stripped_to_status_and_summary(tmp_path):
+def test_tool_result_payloads_are_reduced_to_a_text_note(tmp_path):
     memory = ConversationMemory(tmp_path / "m.json")
     memory.add("user", _fat_tool_result(1))
     stored = memory.messages[-1]["content"][0]
-    payload = json.loads(stored["content"])
 
-    assert set(payload) <= {"status", "summary", "error"}
-    assert payload["status"] == "success"
-    assert "Generated 20 employee rows" in payload["summary"]
-    assert "preview" not in stored["content"]
-    assert "tool_use_id" in stored, "the block must stay a valid tool_result"
+    assert stored["type"] == "text", "an orphaned tool_result is protocol-invalid"
+    assert "generate_employee_csv" in stored["text"]
+    assert "success" in stored["text"]
+    assert "Generated 20 employee rows" in stored["text"]
+    # The bulky payload must not survive into the next run's prompt.
+    assert "preview" not in stored["text"]
+    assert "columns" not in stored["text"]
+
+
+def test_replayed_history_never_contains_protocol_blocks(tmp_path):
+    """Regression: a tool_result replayed without its tool_use is rejected.
+
+    Gemini answers "function response turn comes immediately after a function
+    call turn"; Anthropic rejects the unmatched id. Memory therefore stores
+    outcomes as prose, never as tool_use / tool_result blocks.
+    """
+    memory = ConversationMemory(tmp_path / "m.json")
+    memory.add("assistant", [
+        {"type": "text", "text": "calling the tool"},
+        {"type": "tool_use", "name": "generate_employee_csv",
+         "input": {"row_count": 20}, "id": "generate_employee_csv::0"},
+    ])
+    memory.add("user", _fat_tool_result(1))
+
+    for message in memory.replay():
+        for block in message["content"]:
+            assert block["type"] == "text", f"protocol block leaked: {block}"
 
 
 def test_facts_survive_untouched(tmp_path):
@@ -104,3 +125,28 @@ def test_stored_transcript_stays_small_on_disk(tmp_path):
     memory.save()
     assert len(memory.messages) <= memory.max_turns
     assert (tmp_path / "m.json").stat().st_size < 60_000
+
+
+def test_legacy_memory_file_is_sanitized_on_load(tmp_path):
+    """A file written before the fix must not poison the next run.
+
+    Regression: memory.json held raw tool_result blocks, _sanitize ran only on
+    add(), and every subsequent live run died with 400 INVALID_ARGUMENT until
+    the file was deleted by hand.
+    """
+    path = tmp_path / "m.json"
+    path.write_text(json.dumps({"facts": {"last_csv_path": "x.csv"}, "messages": [
+        {"role": "assistant", "content": [
+            {"type": "tool_use", "name": "generate_employee_csv",
+             "input": {"row_count": 20}, "id": "generate_employee_csv::0"}]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "generate_employee_csv::0",
+             "content": json.dumps({"status": "success", "summary": "made it"})}]},
+    ]}), encoding="utf-8")
+
+    memory = ConversationMemory(path)
+
+    for message in memory.messages:
+        for block in message["content"]:
+            assert block["type"] == "text", f"legacy block survived: {block}"
+    assert memory.facts["last_csv_path"] == "x.csv", "facts must be untouched"

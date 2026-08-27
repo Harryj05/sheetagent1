@@ -127,21 +127,29 @@ def test_memory_persists_between_runs(config):
 # No silent downgrade: an agent that cannot reason must say so, not quietly
 # run a fixed sequence and report success.
 # --------------------------------------------------------------------------- #
-def test_missing_api_key_is_fatal(config, monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    with pytest.raises(MissingCredentials, match="ANTHROPIC_API_KEY"):
+@pytest.mark.parametrize("provider,env_var", [
+    ("gemini", "GEMINI_API_KEY"),
+    ("anthropic", "ANTHROPIC_API_KEY"),
+])
+def test_missing_api_key_is_fatal(config, monkeypatch, provider, env_var):
+    """Whichever provider is configured, its own key is the one named.
+
+    Parametrized rather than hardcoded so changing the default provider is a
+    one-line config change, not a test edit.
+    """
+    monkeypatch.delenv(env_var, raising=False)
+    config.agent.provider = provider
+    with pytest.raises(MissingCredentials, match=env_var):
         SheetAgent(config=config)
 
 
 def test_missing_api_key_is_tolerated_only_with_an_explicit_test_planner(
-        config, monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        config):
     agent = SheetAgent(config=config, test_planner=deterministic_test_planner)
     assert agent.use_llm is False
 
 
-def test_test_mode_plan_is_labelled_as_non_reasoning(config, monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+def test_test_mode_plan_is_labelled_as_non_reasoning(config):
     config.agent.enabled_tools = ["generate_employee_csv"]
     agent = SheetAgent(config=config, test_planner=deterministic_test_planner)
     result = agent.run("make a csv")

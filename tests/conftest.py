@@ -31,3 +31,14 @@ def ctx(config):
 @pytest.fixture
 def registry():
     return REGISTRY
+
+@pytest.fixture(autouse=True)
+def no_provider_keys(monkeypatch):
+    """No test may depend on a key that happens to be exported locally.
+
+    Without this the suite passes on a bare CI runner and behaves differently
+    on a developer machine that has GEMINI_API_KEY or ANTHROPIC_API_KEY set.
+    Tests that need a key set it themselves.
+    """
+    for var in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)

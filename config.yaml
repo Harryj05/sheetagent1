@@ -5,11 +5,12 @@ log_dir: logs
 memory_file: memory/conversation.json
 
 agent:
-  # anthropic (ANTHROPIC_API_KEY) | gemini (GEMINI_API_KEY).
+  # gemini (GEMINI_API_KEY) | anthropic (ANTHROPIC_API_KEY).
   # The tool registry is shared, so switching providers changes no tool code.
-  provider: anthropic
-  model: claude-sonnet-5
-  # For Gemini: provider: gemini + model: gemini-3.6-flash (2.5-flash is retired)
+  # Gemini is the default because it is the path verified end to end against
+  # the live API; for Anthropic use provider: anthropic + model: claude-sonnet-5.
+  provider: gemini
+  model: gemini-3.6-flash
   max_tokens: 4096
   max_iterations: 20
   temperature: 0.0

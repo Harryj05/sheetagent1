@@ -50,7 +50,11 @@ class ConversationMemory:
             return
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-            self.messages = data.get("messages", [])
+            # Sanitize on the way in as well as on the way out: a file written
+            # by an earlier version can still hold raw tool_result blocks, and
+            # replaying one of those is protocol-invalid.
+            self.messages = [{**m, "content": self._sanitize(m.get("content"))}
+                             for m in data.get("messages", [])]
             self.facts = data.get("facts", {})
             log.debug("loaded memory", extra={"turns": len(self.messages)})
         except Exception as exc:
@@ -58,7 +62,18 @@ class ConversationMemory:
 
     @staticmethod
     def _shrink_tool_result(block: dict[str, Any]) -> dict[str, Any]:
-        """Reduce a tool_result block to status + summary (+ error)."""
+        """Reduce a tool_result block to a plain *text* note.
+
+        Deliberately not kept as a ``tool_result`` block. Both providers require
+        a tool result to sit immediately after the matching tool call, and the
+        call itself is dropped here (a call without its result is noise). A
+        replayed transcript containing an orphaned tool result is protocol-
+        invalid: Gemini rejects it with "function response turn comes
+        immediately after a function call turn", and Anthropic likewise.
+
+        Cross-run memory is *context*, not a resumable protocol transcript, so
+        the outcome is recorded as prose the next run can read.
+        """
         payload = block.get("content")
         if isinstance(payload, str):
             try:
@@ -68,8 +83,11 @@ class ConversationMemory:
         if not isinstance(payload, dict):
             payload = {"summary": str(payload)[:200]}
         slim = {k: payload[k] for k in _KEPT_RESULT_FIELDS if k in payload}
-        return {**{k: v for k, v in block.items() if k != "content"},
-                "content": json.dumps(slim or {"status": "unknown"}, default=str)}
+        tool = str(block.get("tool_use_id", "")).split("::")[0] or "tool"
+        detail = slim.get("summary") or slim.get("error") or ""
+        status = slim.get("status", "unknown")
+        note = f"[previous run] {tool}: {status}"
+        return {"type": "text", "text": f"{note} - {detail}" if detail else note}
 
     @classmethod
     def _sanitize(cls, content: Any) -> Any:
@@ -93,6 +111,10 @@ class ConversationMemory:
                 continue
             if block.get("type") == "tool_result":
                 cleaned.append(cls._shrink_tool_result(block))
+            elif block.get("type") == "tool_use":
+                # Dropped: see _shrink_tool_result. Kept explicit so the pairing
+                # rule is visible at both ends.
+                continue
             elif block.get("type") == "text":
                 cleaned.append(block)
             # tool_use blocks are dropped: a call is meaningless without its

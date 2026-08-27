@@ -44,10 +44,11 @@ class SheetsConfig:
 
 @dataclass
 class AgentConfig:
-    #: anthropic | gemini. Selects the client; the tool registry and its
+    #: gemini | anthropic. Selects the client; the tool registry and its
     #: schemas are shared, so switching providers changes no tool code.
-    provider: str = "anthropic"
-    model: str = "claude-sonnet-5"
+    #: Gemini is the default because it is the verified path.
+    provider: str = "gemini"
+    model: str = "gemini-3.6-flash"
     max_tokens: int = 4096
     max_iterations: int = 20
     temperature: float = 0.0

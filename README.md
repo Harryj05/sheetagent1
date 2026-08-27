@@ -265,15 +265,18 @@ The image runs as a non-root user.
 
 Set `agent.provider` in `config.yaml` (or `SHEETAGENT_PROVIDER`):
 
-| Provider | Key | Suggested model |
-|---|---|---|
-| `anthropic` (default) | `ANTHROPIC_API_KEY` | `claude-sonnet-5` |
-| `gemini` | `GEMINI_API_KEY` | `gemini-3.6-flash` |
+| Provider | Key | Model | Status |
+|---|---|---|---|
+| `gemini` (default) | `GEMINI_API_KEY` | `gemini-3.6-flash` | Verified end to end against the live API |
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5` | Implemented and unit-tested; no live run made |
+
+Gemini is the default because it is the path that has actually been run against
+a live API, tools and all. Switching is a two-line config change.
 
 ```yaml
 agent:
-  provider: gemini
-  model: gemini-3.6-flash
+  provider: anthropic       # the non-default
+  model: claude-sonnet-5
 ```
 
 ```bash
