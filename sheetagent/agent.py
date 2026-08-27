@@ -1,0 +1,226 @@
+"""The agent: plan, then a Claude tool-calling loop, then a structured report."""
+from __future__ import annotations
+
+import json
+import logging
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from .config import Config
+from .events import EventBus
+from .memory import ConversationMemory
+from .planner import Plan, make_plan
+from .registry import REGISTRY, ToolContext, ToolRegistry
+
+log = logging.getLogger("sheetagent.agent")
+
+SYSTEM_PROMPT = """You are SheetAgent, an autonomous agent that moves employee
+data into spreadsheets on the user's behalf.
+
+Rules:
+* Work autonomously. Never ask the user to do a step you have a tool for, and
+  never ask for confirmation mid-run.
+* Follow the plan you were given, but adapt if a tool result contradicts it.
+* Chain tool outputs: use the csv_path returned by generate_employee_csv as the
+  input to the import tools rather than guessing a path.
+* Generate at least 20 employee rows unless the user asked for a different number.
+* If a tool returns status "failed", do not pretend it succeeded. Try one
+  sensible alternative if the error suggests one (a different output format, a
+  different engine), otherwise record the failure and continue with the steps
+  that can still run.
+* Finish by calling the verification tool, then write a final plain-text report
+  listing every step with SUCCESS or FAILED, the file paths and URLs produced,
+  and anything the user must do manually."""
+
+
+class MissingCredentials(RuntimeError):
+    """No usable Anthropic client and no explicit test planner.
+
+    Deliberately fatal. The agent's whole premise is that a model chooses the
+    tools, so quietly degrading to a fixed sequence would make a successful run
+    mean something different than the user thinks it means.
+    """
+
+
+@dataclass
+class RunResult:
+    request: str
+    plan: Plan | None
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    report: str = ""
+    artifacts: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def ok(self) -> bool:
+        return bool(self.steps) and all(s.get("status") == "success" for s in self.steps)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"request": self.request,
+                "plan": self.plan.to_dict() if self.plan else None,
+                "steps": self.steps, "artifacts": self.artifacts,
+                "report": self.report, "ok": self.ok}
+
+
+class SheetAgent:
+    def __init__(self, config: Config | None = None,
+                 registry: ToolRegistry | None = None,
+                 events: EventBus | None = None,
+                 client: Any | None = None,
+                 test_planner: Any | None = None) -> None:
+        from . import tools  # noqa: F401  - registers the tools
+
+        self.config = config or Config.load()
+        self.registry = registry or REGISTRY
+        self.events = events or EventBus()
+        self.memory = ConversationMemory(self.config.memory_file)
+        #: Set only by --test-mode / unit tests. Never populated by product code.
+        self.test_planner = test_planner
+        self.client = client
+        if self.client is None and self.test_planner is None:
+            self.client = self._make_client()
+
+    @property
+    def use_llm(self) -> bool:
+        return self.client is not None
+
+    @staticmethod
+    def _make_client():
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            raise MissingCredentials(
+                "ANTHROPIC_API_KEY is not set, so the agent cannot plan or choose "
+                "tools. Set the key, or pass --test-mode to run the fixed "
+                "deterministic plan used by CI (which does no reasoning).")
+        try:
+            import anthropic
+        except ImportError as exc:
+            raise MissingCredentials(
+                "the anthropic package is not installed; "
+                "run pip install -r requirements.txt") from exc
+        return anthropic.Anthropic()
+
+    # ------------------------------------------------------------------ #
+    def run(self, request: str) -> RunResult:
+        ctx = ToolContext(config=self.config, events=self.events)
+        schemas = self.registry.schemas(self.config.agent.enabled_tools)
+        self.events.emit("run_started", f"Request: {request}",
+                         request=request, tools=[t["name"] for t in schemas],
+                         mode="llm" if self.use_llm else "test-mode")
+
+        # ---- 1. plan ---------------------------------------------------
+        plan: Plan | None = None
+        try:
+            plan = (make_plan(self.client, self.config.agent.model, request, schemas,
+                              self.memory.summary())
+                    if self.use_llm else self.test_planner(request, schemas))
+            self.events.emit("plan_ready", plan.render(), plan=plan.to_dict())
+        except Exception as exc:
+            log.warning("planning failed, continuing without a plan: %s", exc)
+            self.events.emit("step_progress", f"Planning failed: {exc}")
+
+        # ---- 2. execute ------------------------------------------------
+        result = (self._execute_with_llm(request, plan, schemas, ctx)
+                  if self.use_llm else self._execute_plan(plan, ctx, request))
+
+        # ---- 3. remember + report -------------------------------------
+        result.artifacts = dict(ctx.state)
+        for key in ("csv_path", "excel_path", "spreadsheet_url"):
+            if key in ctx.state:
+                self.memory.remember(f"last_{key}", ctx.state[key])
+        self.memory.remember("last_request", request)
+        self.memory.save()
+        self.events.emit("run_finished", result.report or "Run finished",
+                         ok=result.ok, artifacts=result.artifacts)
+        return result
+
+    # ------------------------------------------------------------------ #
+    def _execute_with_llm(self, request: str, plan: Plan | None,
+                          schemas: list[dict[str, Any]], ctx: ToolContext) -> RunResult:
+        result = RunResult(request=request, plan=plan)
+        content = request if plan is None else (
+            f"{request}\n\nApproved plan to follow:\n{plan.render()}")
+        self.memory.add("user", content)
+        # Bounded slice, not the whole transcript: see ConversationMemory.replay.
+        messages = self.memory.replay()
+
+        for iteration in range(1, self.config.agent.max_iterations + 1):
+            response = self.client.messages.create(
+                model=self.config.agent.model,
+                max_tokens=self.config.agent.max_tokens,
+                temperature=self.config.agent.temperature,
+                system=SYSTEM_PROMPT,
+                tools=schemas,
+                messages=messages,
+            )
+            text = "".join(b.text for b in response.content
+                           if getattr(b, "type", "") == "text")
+            if text.strip():
+                self.events.emit("assistant_message", text.strip())
+            messages.append({"role": "assistant", "content": response.content})
+
+            calls = [b for b in response.content if getattr(b, "type", "") == "tool_use"]
+            if not calls:
+                result.report = text.strip()
+                break
+
+            tool_results = []
+            for call in calls:
+                payload = self.registry.execute(call.name, dict(call.input), ctx)
+                result.steps.append({"tool": call.name, "input": dict(call.input),
+                                     **payload})
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": call.id,
+                    "content": json.dumps(payload, default=str),
+                    "is_error": payload.get("status") == "failed",
+                })
+            messages.append({"role": "user", "content": tool_results})
+            # Stored sanitised (status + summary only) so a later run inherits
+            # what happened without inheriting the payloads.
+            self.memory.add("user", tool_results)
+        else:
+            result.report = ("Stopped after reaching max_iterations "
+                             f"({self.config.agent.max_iterations}).")
+
+        self.memory.add("assistant", result.report or "(no final message)")
+        return result
+
+    def _execute_plan(self, plan: Plan | None, ctx: ToolContext,
+                      request: str) -> RunResult:
+        """Offline executor: runs the deterministic plan, wiring outputs forward."""
+        result = RunResult(request=request, plan=plan)
+        if plan is None:
+            result.report = "No plan available and no model access; nothing executed."
+            return result
+        for step in plan.steps:
+            args = dict(step.inputs)
+            if step.tool != "generate_employee_csv":
+                args.setdefault("csv_path", ctx.state.get("csv_path", ""))
+            if step.tool == "generate_employee_csv":
+                args.setdefault("row_count", 20)
+            if step.tool == "verify_imports":
+                args.setdefault("workbook_path", ctx.state.get("excel_path"))
+                args.setdefault("spreadsheet_id", ctx.state.get("spreadsheet_id"))
+            payload = self.registry.execute(step.tool, args, ctx)
+            result.steps.append({"tool": step.tool, "input": args, **payload})
+        result.artifacts = dict(ctx.state)
+        result.report = render_report(result)
+        return result
+
+
+def render_report(result: RunResult) -> str:
+    lines = ["Workflow report", "=" * 40]
+    for i, step in enumerate(result.steps, start=1):
+        status = step.get("status", "?").upper()
+        lines.append(f"{i}. {step['tool']}: {status}")
+        detail = step.get("summary") or step.get("error")
+        if detail:
+            lines.append(f"   {detail}")
+    if result.artifacts:
+        lines.append("")
+        lines.append("Artifacts:")
+        for key, value in result.artifacts.items():
+            if key.endswith(("path", "url", "id")):
+                lines.append(f"  {key}: {value}")
+    return "\n".join(lines)
