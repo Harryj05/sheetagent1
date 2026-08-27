@@ -1,0 +1,14 @@
+.venv/
+.git/
+.pytest_cache/
+__pycache__/
+*.pyc
+output/
+demo_output/
+logs/
+memory/
+credentials.json
+token.json
+.env
+run_result.json
+run_stderr.txt
