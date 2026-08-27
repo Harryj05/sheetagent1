@@ -154,3 +154,36 @@ def test_test_mode_plan_is_labelled_as_non_reasoning(config):
     agent = SheetAgent(config=config, test_planner=deterministic_test_planner)
     result = agent.run("make a csv")
     assert any("DETERMINISTIC TEST PLANNER" in r for r in result.plan.risks)
+
+
+def test_provider_error_mid_run_is_reported_not_raised(config):
+    """A rate limit or outage must not dump a traceback over completed work.
+
+    Regression: an exhausted Gemini quota crashed the process with a raw
+    stack trace after the CSV had already been written.
+    """
+    class Exploding(FakeClient):
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) <= 2:      # planner, then the first tool call
+                return self.script.pop(0)
+            raise RuntimeError("429 RESOURCE_EXHAUSTED: quota exceeded")
+
+    plan_json = json.dumps({"goal": "csv", "steps": [
+        {"n": 1, "tool": "generate_employee_csv", "intent": "make data",
+         "inputs": {}}], "risks": []})
+    client = Exploding([
+        FakeResponse([TextBlock(plan_json)]),
+        FakeResponse([ToolUseBlock("generate_employee_csv", {"row_count": 20})]),
+    ])
+    config.agent.enabled_tools = ["generate_employee_csv"]
+
+    result = SheetAgent(config=config, client=client).run("make a csv")
+
+    assert result.steps[0]["status"] == "success", "completed work must survive"
+    assert Path(result.artifacts["csv_path"]).exists()
+    assert result.steps[-1]["status"] == "failed"
+    assert "RESOURCE_EXHAUSTED" in result.steps[-1]["error"]
+    assert "stopped early" in result.report
+    assert "1 of 1 step(s) succeeded" in result.report
+    assert result.ok is False

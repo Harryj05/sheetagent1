@@ -125,14 +125,36 @@ class SheetAgent:
         messages = self.memory.replay()
 
         for iteration in range(1, self.config.agent.max_iterations + 1):
-            response = self.client.messages.create(
-                model=self.config.agent.model,
-                max_tokens=self.config.agent.max_tokens,
-                temperature=self.config.agent.temperature,
-                system=SYSTEM_PROMPT,
-                tools=schemas,
-                messages=messages,
-            )
+            try:
+                response = self.client.messages.create(
+                    model=self.config.agent.model,
+                    max_tokens=self.config.agent.max_tokens,
+                    temperature=self.config.agent.temperature,
+                    system=SYSTEM_PROMPT,
+                    tools=schemas,
+                    messages=messages,
+                )
+            except Exception as exc:
+                # A provider outage, a rate limit or an exhausted quota must not
+                # dump a traceback over a run that has already done real work.
+                # Whatever completed stays in result.steps and is reported.
+                detail = f"{type(exc).__name__}: {exc}"
+                log.error("model call failed on iteration %d: %s", iteration, detail)
+                self.events.emit("step_failed", f"Model call failed: {detail}",
+                                 iteration=iteration)
+                done = [s for s in result.steps if s.get("status") == "success"]
+                result.report = "\n".join([
+                    render_report(result),
+                    "",
+                    "Run stopped early: the model provider returned an error "
+                    f"on iteration {iteration}.",
+                    f"  {detail}",
+                    f"{len(done)} of {len(result.steps)} step(s) succeeded before "
+                    "the failure; any output they produced is on disk.",
+                ])
+                result.steps.append({"tool": "(model call)", "input": {},
+                                     "status": "failed", "error": detail})
+                break
             text = "".join(b.text for b in response.content
                            if getattr(b, "type", "") == "text")
             if text.strip():

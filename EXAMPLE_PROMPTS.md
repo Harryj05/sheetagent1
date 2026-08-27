@@ -3,11 +3,22 @@
 The point of these is that **no step order is hardcoded** — the agent reads the
 request, plans, and calls only the tools it needs.
 
-### 1. The assignment prompt (full workflow)
+Run them with `python -m sheetagent "<prompt>"`. Prompts marked **[verified]**
+have been run end to end against the live APIs on `gemini-3.6-flash`.
+
+> **Note on Google Sheets:** a service account cannot create spreadsheets, so
+> `sheets.spreadsheet_id` must point at a sheet you created and shared with it.
+> With OAuth desktop credentials the agent creates sheets itself. See the README.
+
+### 1. The assignment prompt (full workflow) — **[verified]**
 ```
 Create a sample employee CSV and import it into Excel and Google Sheets.
 ```
 → all four tools: generate → Excel → Sheets → verify.
+
+Actual result: the model planned four steps, chose 25 rows on its own, drove
+Excel through COM, wrote 25 rows to the live sheet, and verification confirmed
+row counts and all 9 headers (`all_verified: true`).
 
 ### 2. Explicit row count
 ```
@@ -35,8 +46,9 @@ the data to Google Sheets.
 ### 6. Existing spreadsheet
 ```
 Regenerate the employee data with 40 rows and write it into the existing
-spreadsheet 1AbCdEfGhIjKlMnOpQrStUvWxYz instead of creating a new one.
+spreadsheet 1AbCdEfGhIjKlMnOpQrStUvWxYz.
 ```
+→ overrides `sheets.spreadsheet_id` for this run. Replace the id with your own.
 
 ### 7. Memory across runs
 ```
@@ -45,7 +57,7 @@ Run 2: Now upload the CSV you made last time to Google Sheets.
 ```
 → run 2 resolves the path from `memory/conversation.json`.
 
-### 8. Error handling on purpose
+### 8. Error handling on purpose — **[verified]**
 ```
 Import /tmp/definitely-not-here.csv into Excel and Google Sheets.
 ```
