@@ -1,0 +1,55 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    # ubuntu deliberately: the suite must pass with no Microsoft Excel and no
+    # Google credentials present. Every external dependency is stubbed, so a
+    # green run here proves the agent degrades honestly rather than requiring
+    # a fully provisioned machine.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        # pywin32 is marker-gated in requirements.txt and simply will not
+        # install here, which is the point.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Assert the environment really is bare
+        run: |
+          test ! -f credentials.json || (echo "credentials.json must not be committed" && exit 1)
+          test ! -f token.json || (echo "token.json must not be committed" && exit 1)
+          python -c "import importlib.util, sys; sys.exit(1) if importlib.util.find_spec('win32com') else print('no pywin32: openpyxl path will be exercised')"
+
+      - name: Run tests
+        env:
+          # Explicitly empty: the agent must refuse to run without a key, and
+          # the suite must never depend on one.
+          ANTHROPIC_API_KEY: ""
+        run: pytest -q --cov=sheetagent --cov-report=term-missing
+
+      - name: Excel engine falls back honestly with no Excel installed
+        env:
+          ANTHROPIC_API_KEY: ""
+        run: |
+          python -m sheetagent --test-mode --quiet \
+            "Create an employee CSV and import it into Excel." || true
+          test -f output/employees.xlsx
+          echo "workbook written headlessly"
