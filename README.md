@@ -20,8 +20,8 @@ natural language
        │
        ▼
 ┌──────────────┐   plan (JSON)   ┌───────────────────────────────┐
-│   Planner    │ ───────────────►│  Executor: Claude tool-calling │
-│ (Claude)     │                 │  loop over the tool registry   │
+│   Planner    │ ───────────────►│  Executor: tool-calling loop  │
+│ (the model)  │                 │  over the tool registry       │
 └──────────────┘                 └───────────────┬───────────────┘
                                                  │ selects tools dynamically
         ┌────────────────────────────────────────┼────────────────────────┐
@@ -32,21 +32,26 @@ natural language
                         employees.xlsx        Google Spreadsheet        pass / fail report
 ```
 
+The model is **Gemini by default, Anthropic optionally** — the same loop, the
+same tools, either way.
+
 Two stages, deliberately separated:
 
 1. **Plan** — the model is asked for an ordered plan naming a tool per step and
    the risks it foresees. Unknown tool names are dropped before execution, so a
    hallucinated step can never run. The plan is printed and stored in memory.
-2. **Execute** — a Claude tool-calling loop. The model picks the tool and its
+2. **Execute** — a tool-calling loop. The model picks the tool and its
    arguments each turn; the runtime executes it, feeds the JSON result back
    (with `is_error` set on failures) and lets the model adapt. Nothing about the
    step order is hardcoded into a script — swap the prompt and a different
    subset of tools runs.
 
 Every tool is a plain Python function registered with `@tool(...)`; the registry
-turns it into an Anthropic tool schema, executes it defensively (a raising tool
-becomes a structured `{"status": "failed", ...}` result, never a crash) and
-emits progress events.
+turns it into a tool schema, executes it defensively (a raising tool becomes a
+structured `{"status": "failed", ...}` result, never a crash) and emits progress
+events. The registry's schema format is Anthropic-shaped and is the single
+source of truth — the Gemini adapter translates *from* it, so adding a provider
+never means touching a tool.
 
 ### Design decisions worth knowing
 
@@ -57,7 +62,7 @@ emits progress events.
 | Memory replays a fixed window, not the whole transcript | Facts (last CSV path, last spreadsheet URL) are kept forever because they are tiny and are what makes a follow-up run useful. The transcript is capped two ways: `tool_result` blocks are stored as `status` + `summary` only, and just the last two exchanges are replayed. Run 50's prompt is the same size as run 1's. |
 | Providers are adapters, not branches | `agent.py` and `planner.py` know exactly one interface — `client.messages.create(...) -> response.content`. Gemini support is a translation layer (`sheetagent/providers/gemini.py`) that reshapes tool schemas, conversation and responses into that interface. The tool registry stays the single source of truth: switching provider changes no tool code and no executor code. |
 | `give_up_on` in the retry helper | Retrying a missing credentials file three times is theatre. Configuration errors fail on attempt 1; transient API errors get exponential backoff. |
-| **No silent downgrade** | Without `ANTHROPIC_API_KEY` the agent refuses to start (exit 2). An agent whose premise is "the model chooses the tools" must not quietly run a fixed sequence and report the same success. |
+| **No silent downgrade** | Without a key for the configured provider (`GEMINI_API_KEY` by default) the agent refuses to start (exit 2). An agent whose premise is "the model chooses the tools" must not quietly run a fixed sequence and report the same success. |
 | `--test-mode` lives in `tests/` | CI still needs to exercise the tool layer, retries and verification without a key. That fixed plan is a **test double**, kept in `tests/support/deterministic_planner.py` so it can never be mistaken for the product's planner, and every plan it produces is labelled `DETERMINISTIC TEST PLANNER`. |
 
 ---
@@ -76,12 +81,18 @@ pip install -r requirements.txt
 
 `pywin32` installs only on Windows (marker-gated in `requirements.txt`).
 
-### 2. Anthropic key
+### 2. Model API key
+
+The default provider is **Gemini**. See [Model providers](#model-providers) to
+use Anthropic instead.
 
 ```bash
 cp .env.example .env      # then edit
-export ANTHROPIC_API_KEY=sk-ant-...        # Windows: setx ANTHROPIC_API_KEY ...
+export GEMINI_API_KEY=...                  # Windows: setx GEMINI_API_KEY ...
 ```
+
+The agent will not start without a key for the configured provider — that is
+deliberate, not a bug. See the no-silent-downgrade note below.
 
 ### 3. Microsoft Excel
 
@@ -155,8 +166,9 @@ python -m sheetagent --test-mode "Create an employee CSV and import it into Exce
 Flags: `--config`, `--rows N`, `--json`, `--quiet`, `--log-level`,
 `--excel-engine {auto,com,openpyxl}`, `--test-mode`.
 
-`ANTHROPIC_API_KEY` is **required**. Without it the agent exits 2 rather than
-degrading to a non-reasoning plan.
+A key for the configured provider is **required** — `GEMINI_API_KEY` by
+default. Without it the agent exits 2 rather than degrading to a non-reasoning
+plan.
 
 `EXAMPLE_PROMPTS.md` has the full list with what each one should produce.
 
@@ -237,8 +249,8 @@ docker run --rm sheetagent
 # exercise the workflow headlessly (openpyxl, no Excel)
 docker run --rm -v "$PWD/output:/app/output"   sheetagent python -m sheetagent --test-mode   "Create an employee CSV and import it into Excel."
 
-# with a key and credentials, the model-driven path minus Excel
-docker run --rm   -e ANTHROPIC_API_KEY   -v "$PWD/credentials.json:/app/credentials.json:ro"   -v "$PWD/output:/app/output"   -v "$PWD/logs:/app/logs"   sheetagent python -m sheetagent "Generate 30 employees and upload them to Google Sheets."
+# with a key and credentials, the model-driven path minus Excel (Gemini by default)
+docker run --rm   -e GEMINI_API_KEY   -v "$PWD/credentials.json:/app/credentials.json:ro"   -v "$PWD/output:/app/output"   -v "$PWD/logs:/app/logs"   sheetagent python -m sheetagent "Generate 30 employees and upload them to Google Sheets."
 ```
 
 The image pins `SHEETAGENT_EXCEL_ENGINE=openpyxl` rather than relying on `auto`,
@@ -280,8 +292,13 @@ agent:
 ```
 
 ```bash
+# default - nothing to change
 export GEMINI_API_KEY=...
 python -m sheetagent "Create an employee CSV and import it into Excel and Google Sheets."
+
+# or switch to Anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+python -m sheetagent --config config.yaml "..."      # with provider: anthropic set
 ```
 
 The agent loop is provider-agnostic. `sheetagent/providers/gemini.py` performs
@@ -297,8 +314,8 @@ Gemini has no tool-call id and keys its `functionResponse` by function *name*,
 so the adapter synthesises `"<name>::<n>"` — the name is recoverable from the id
 without holding cross-call state.
 
-`google-genai` is only imported when `provider: gemini` is actually selected, so
-Anthropic-only installs need not have it.
+`google-genai` ships in `requirements.txt` since Gemini is the default; it is
+still imported lazily, so an Anthropic-only deployment can drop it.
 
 **Verified against the live Gemini API.** Gemini 3.x attaches an opaque
 `thought_signature` to every `functionCall` part and rejects the following turn
@@ -335,7 +352,7 @@ pytest -q                       # 73 tests, no network, no API key
 pytest --cov=sheetagent -q
 ```
 
-The Anthropic client and the Google API client are both stubbed, so the planner,
+Both model clients and the Google API client are stubbed, so the planner,
 the tool-calling loop, failure propagation, retry semantics and verification are
 all covered offline.
 
