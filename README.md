@@ -55,6 +55,7 @@ emits progress events.
 | Excel via **COM (pywin32)** with an **openpyxl fallback** | The assignment asks for the real Excel application. COM does that on Windows. Everywhere else the agent still completes headlessly and *says so* in its result (`engine`, `fallback_reason`, `warning`) instead of quietly pretending. Setting `excel.engine: com` disables the fallback and fails loudly. |
 | Independent `verify_imports` tool | The agent isn't allowed to claim success from its own earlier output. Verification re-opens the saved workbook and re-reads the live Google Sheet, then compares headers and row counts against the CSV. |
 | Memory replays a fixed window, not the whole transcript | Facts (last CSV path, last spreadsheet URL) are kept forever because they are tiny and are what makes a follow-up run useful. The transcript is capped two ways: `tool_result` blocks are stored as `status` + `summary` only, and just the last two exchanges are replayed. Run 50's prompt is the same size as run 1's. |
+| Providers are adapters, not branches | `agent.py` and `planner.py` know exactly one interface — `client.messages.create(...) -> response.content`. Gemini support is a translation layer (`sheetagent/providers/gemini.py`) that reshapes tool schemas, conversation and responses into that interface. The tool registry stays the single source of truth: switching provider changes no tool code and no executor code. |
 | `give_up_on` in the retry helper | Retrying a missing credentials file three times is theatre. Configuration errors fail on attempt 1; transient API errors get exponential backoff. |
 | **No silent downgrade** | Without `ANTHROPIC_API_KEY` the agent refuses to start (exit 2). An agent whose premise is "the model chooses the tools" must not quietly run a fixed sequence and report the same success. |
 | `--test-mode` lives in `tests/` | CI still needs to exercise the tool layer, retries and verification without a key. That fixed plan is a **test double**, kept in `tests/support/deterministic_planner.py` so it can never be mistaken for the product's planner, and every plan it produces is labelled `DETERMINISTIC TEST PLANNER`. |
@@ -242,6 +243,44 @@ The image runs as a non-root user.
 
 ---
 
+## Model providers
+
+Set `agent.provider` in `config.yaml` (or `SHEETAGENT_PROVIDER`):
+
+| Provider | Key | Suggested model |
+|---|---|---|
+| `anthropic` (default) | `ANTHROPIC_API_KEY` | `claude-sonnet-5` |
+| `gemini` | `GEMINI_API_KEY` | `gemini-2.5-flash` |
+
+```yaml
+agent:
+  provider: gemini
+  model: gemini-2.5-flash
+```
+
+```bash
+export GEMINI_API_KEY=...
+python -m sheetagent "Create an employee CSV and import it into Excel and Google Sheets."
+```
+
+The agent loop is provider-agnostic. `sheetagent/providers/gemini.py` performs
+three translations and nothing else:
+
+1. registry `input_schema` → Gemini `functionDeclarations` (dropping schema keys
+   Gemini's parser rejects, such as `default` and `additionalProperties`);
+2. Anthropic `messages` → Gemini `contents`, mapping `tool_use`/`tool_result`
+   onto `functionCall`/`functionResponse`;
+3. Gemini parts → blocks exposing `.type`, `.text`, `.name`, `.input`, `.id`.
+
+Gemini has no tool-call id and keys its `functionResponse` by function *name*,
+so the adapter synthesises `"<name>::<n>"` — the name is recoverable from the id
+without holding cross-call state.
+
+`google-genai` is only imported when `provider: gemini` is actually selected, so
+Anthropic-only installs need not have it.
+
+---
+
 ## Configuration
 
 Everything lives in `config.yaml`; environment variables override it
@@ -297,6 +336,7 @@ sheetagent/
 tests/support/      deterministic_planner.py - the --test-mode test double
   config.py         YAML + env configuration
   logging_setup.py  structured JSON logging
+  providers/        anthropic | gemini clients behind one interface
   cli.py            command-line entrypoint
   mcp_server.py     the same tools over MCP (schemas derived from the registry)
   tools/

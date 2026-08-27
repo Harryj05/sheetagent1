@@ -44,6 +44,9 @@ class SheetsConfig:
 
 @dataclass
 class AgentConfig:
+    #: anthropic | gemini. Selects the client; the tool registry and its
+    #: schemas are shared, so switching providers changes no tool code.
+    provider: str = "anthropic"
     model: str = "claude-sonnet-5"
     max_tokens: int = 4096
     max_iterations: int = 20
@@ -86,6 +89,8 @@ class Config:
             memory_file=raw.get("memory_file", "memory/conversation.json"),
         )
         # Environment always wins - handy for CI and Docker.
+        if v := os.environ.get("SHEETAGENT_PROVIDER"):
+            cfg.agent.provider = v
         if v := os.environ.get("SHEETAGENT_MODEL"):
             cfg.agent.model = v
         if v := os.environ.get("SHEETAGENT_EXCEL_ENGINE"):

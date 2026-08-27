@@ -17,3 +17,6 @@ mcp>=1.2.0
 
 # --- Windows only: drives the real Excel application ---
 pywin32>=306 ; sys_platform == "win32"
+
+# Optional alternative model provider (agent.provider: gemini).
+google-genai>=1.0.0

@@ -13,6 +13,6 @@ deliberate, and worth showing.
 | 3:30–4:15 | Open `output/employees.xlsx` and the Google Sheet URL side by side | Both contain the same 20 rows; the verification step already compared them programmatically. |
 | 4:15–5:00 | `python -m sheetagent "Just generate 25 employee records as a CSV. Don't open Excel."` | Only one tool call — proof the agent selects tools from the request rather than replaying a script. |
 | 5:00–5:45 | Rename `credentials.json`, re-run the full prompt | Google step fails cleanly with a hint, Excel step still succeeds, the report says exactly which step failed. Restore the file. |
-| 5:45–6:30 | `jq 'select(.level=="ERROR")' logs/agent.jsonl`, then `pytest -q` | Structured logs and 78 passing tests. |
+| 5:45–6:30 | `jq 'select(.level=="ERROR")' logs/agent.jsonl`, then `pytest -q` | Structured logs and 94 passing tests. |
 | 6:30–6:50 | Unset `ANTHROPIC_API_KEY` and re-run | Exit 2 and a clear error. No silent downgrade: if the model can't choose the tools, the agent doesn't pretend to have run. `--test-mode` exists for CI only and announces itself on every run. |
 | 6:50–7:20 | `config.yaml` — comment out a tool in `enabled_tools`, re-run | The agent plans around the missing tool. Close on the MCP server line. |

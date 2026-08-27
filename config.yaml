@@ -5,7 +5,11 @@ log_dir: logs
 memory_file: memory/conversation.json
 
 agent:
+  # anthropic (ANTHROPIC_API_KEY) | gemini (GEMINI_API_KEY).
+  # The tool registry is shared, so switching providers changes no tool code.
+  provider: anthropic
   model: claude-sonnet-5
+  # For Gemini, set provider: gemini and model: gemini-2.5-flash
   max_tokens: 4096
   max_iterations: 20
   temperature: 0.0
@@ -27,7 +31,9 @@ sheets:
   token_file: token.json
   spreadsheet_id: ""    # blank -> create a new spreadsheet each run
   worksheet_title: Employees
-  share_with: []        # e.g. ["you@gmail.com"] when using a service account
+  # A service account owns files in its OWN Drive; without this the sheet is
+  # created successfully but you cannot open it.
+  share_with: ["thehrsjain@gmail.com"]
 
 retry:
   max_attempts: 3

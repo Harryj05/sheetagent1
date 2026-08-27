@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -12,7 +11,12 @@ from .config import Config
 from .events import EventBus
 from .memory import ConversationMemory
 from .planner import Plan, make_plan
+from .providers import MissingCredentials, make_client
 from .registry import REGISTRY, ToolContext, ToolRegistry
+
+#: Re-exported: MissingCredentials moved to .providers when Gemini was
+#: added, but it is part of this module's public surface.
+__all__ = ["MissingCredentials", "SheetAgent", "RunResult", "render_report"]
 
 log = logging.getLogger("sheetagent.agent")
 
@@ -33,15 +37,6 @@ Rules:
 * Finish by calling the verification tool, then write a final plain-text report
   listing every step with SUCCESS or FAILED, the file paths and URLs produced,
   and anything the user must do manually."""
-
-
-class MissingCredentials(RuntimeError):
-    """No usable Anthropic client and no explicit test planner.
-
-    Deliberately fatal. The agent's whole premise is that a model chooses the
-    tools, so quietly degrading to a fixed sequence would make a successful run
-    mean something different than the user thinks it means.
-    """
 
 
 @dataclass
@@ -79,26 +74,11 @@ class SheetAgent:
         self.test_planner = test_planner
         self.client = client
         if self.client is None and self.test_planner is None:
-            self.client = self._make_client()
+            self.client = make_client(self.config.agent.provider)
 
     @property
     def use_llm(self) -> bool:
         return self.client is not None
-
-    @staticmethod
-    def _make_client():
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            raise MissingCredentials(
-                "ANTHROPIC_API_KEY is not set, so the agent cannot plan or choose "
-                "tools. Set the key, or pass --test-mode to run the fixed "
-                "deterministic plan used by CI (which does no reasoning).")
-        try:
-            import anthropic
-        except ImportError as exc:
-            raise MissingCredentials(
-                "the anthropic package is not installed; "
-                "run pip install -r requirements.txt") from exc
-        return anthropic.Anthropic()
 
     # ------------------------------------------------------------------ #
     def run(self, request: str) -> RunResult:

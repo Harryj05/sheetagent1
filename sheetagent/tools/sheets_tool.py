@@ -58,6 +58,16 @@ def _classify(exc: Exception) -> Exception:
         hint = (" Enable the Google Sheets API (and the Drive API if "
                 "sheets.share_with is set) for this project, and confirm the "
                 "service account may access the spreadsheet.")
+        # By far the most common cause, and the least obvious: a service
+        # account has NO Drive storage quota of its own, so it cannot create a
+        # file at all. The API reports this as a bare permission error.
+        if "permission" in str(detail).lower() or "quota" in str(detail).lower():
+            hint += (" NOTE: service accounts have no Drive storage quota and "
+                     "cannot CREATE spreadsheets. Either create the spreadsheet "
+                     "yourself, share it with the service-account email as "
+                     "Editor and set sheets.spreadsheet_id, or use OAuth "
+                     "desktop credentials so the file is created in your own "
+                     "Drive.")
     elif status == 404:
         hint = " Check sheets.spreadsheet_id - leave it blank to create a new sheet."
     return SheetsPermanentError(f"Google API returned {status}: {detail}.{hint}")
